@@ -24,7 +24,7 @@ DECLARE SUB SBVolume (BaseAdress, LeftSide, RightSide)
    NEXT Sample
   NEXT Length
  ELSE
-  PRINT "No Soundblaster detected at "; HEX$(BaseAddress); "h."
+  PRINT "No Sound Blaster detected at "; HEX$(BaseAddress); "h."
  END IF
 
 FUNCTION SBBaseAddress
