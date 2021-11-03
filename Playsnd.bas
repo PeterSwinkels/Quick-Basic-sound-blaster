@@ -1,8 +1,7 @@
 DEFINT A-Z
 DECLARE FUNCTION SBBaseAddress ()
-DECLARE FUNCTION SBInitialize ()
+DECLARE FUNCTION SBReset (BaseAddress)
 DECLARE SUB SBOutputSample (BaseAddress, Sample)
-DECLARE SUB SBReset (BaseAddress)
 DECLARE SUB SBVolume (BaseAdress, LeftSide, RightSide)
 
  SCREEN 0
@@ -10,18 +9,23 @@ DECLARE SUB SBVolume (BaseAdress, LeftSide, RightSide)
  COLOR 7, 0
  CLS
 
- BaseAddress = SBInitialize
- SBVolume BaseAddress, &HF, &HF
+ BaseAddress = SBBaseAddress
 
- FOR Length = 0 TO 100
-  FOR Sample = 0 TO Length
-   SBOutputSample BaseAddress, &H0
-  NEXT Sample
+ IF SBReset(BaseAddress) THEN
+  SBVolume BaseAddress, &HF, &HF
 
-  FOR Sample = 0 TO Length
-   SBOutputSample BaseAddress, &HFF
-  NEXT Sample
- NEXT Length
+  FOR Length = 0 TO 100
+   FOR Sample = 0 TO Length
+    SBOutputSample BaseAddress, &H0
+   NEXT Sample
+
+   FOR Sample = 0 TO Length
+    SBOutputSample BaseAddress, &HFF
+   NEXT Sample
+  NEXT Length
+ ELSE
+  PRINT "No Soundblaster detected at "; HEX$(BaseAddress); "h."
+ END IF
 
 FUNCTION SBBaseAddress
  BaseAddress = &H220
@@ -36,13 +40,6 @@ FUNCTION SBBaseAddress
  SBBaseAddress = BaseAddress
 END FUNCTION
 
-FUNCTION SBInitialize
- BaseAddress = SBBaseAddress
- SBReset BaseAddress
-
- SBInitialize = BaseAddress
-END FUNCTION
-
 SUB SBOutputSample (BaseAddress, Sample)
  WAIT BaseAddress + &HC, &H80, &H80
  OUT BaseAddress + &HC, &H10
@@ -50,10 +47,14 @@ SUB SBOutputSample (BaseAddress, Sample)
  OUT BaseAddress + &HC, Sample
 END SUB
 
-SUB SBReset (BaseAddress)
+FUNCTION SBReset (BaseAddress)
  OUT BaseAddress + &H6, &H1
  OUT BaseAddress + &H6, &H0
-END SUB
+
+ SOUND 0, .3
+
+ SBReset = ((INP(BaseAddress + &HE) AND &H80) = &H80) AND (INP(BaseAddress + &HA) = &HAA)
+END FUNCTION
 
 SUB SBVolume (BaseAddress, LeftSide, RightSide)
  OUT BaseAddress + &H4, &H22
