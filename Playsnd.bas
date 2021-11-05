@@ -1,6 +1,7 @@
 DEFINT A-Z
 DECLARE FUNCTION SBBaseAddress ()
 DECLARE FUNCTION SBReset (BaseAddress)
+DECLARE SUB Delay (Interval AS SINGLE)
 DECLARE SUB SBOutputSample (BaseAddress, Sample)
 DECLARE SUB SBVolume (BaseAdress, LeftSide, RightSide)
 
@@ -27,6 +28,13 @@ DECLARE SUB SBVolume (BaseAdress, LeftSide, RightSide)
   PRINT "No Sound Blaster detected at "; HEX$(BaseAddress); "h."
  END IF
 
+SUB Delay (Interval AS SINGLE)
+DIM StartTime AS SINGLE
+
+ StartTime = TIMER
+ DO: LOOP UNTIL TIMER >= StartTime + Interval OR TIMER <= Interval
+END SUB
+
 FUNCTION SBBaseAddress
  BaseAddress = &H220
  Settings$ = LTRIM$(RTRIM$(UCASE$(ENVIRON$("BLASTER"))))
@@ -51,7 +59,7 @@ FUNCTION SBReset (BaseAddress)
  OUT BaseAddress + &H6, &H1
  OUT BaseAddress + &H6, &H0
 
- SOUND 0, .3
+ Delay .03
 
  SBReset = ((INP(BaseAddress + &HE) AND &H80) = &H80) AND (INP(BaseAddress + &HA) = &HAA)
 END FUNCTION
