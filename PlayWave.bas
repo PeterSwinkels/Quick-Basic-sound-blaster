@@ -1,19 +1,29 @@
 DEFINT A-Z
 
+TYPE WVDataStr
+ DataID AS STRING * 4
+ DataSize AS LONG
+END TYPE
+
+TYPE WVFactStr
+ Padding AS STRING * 2
+ FactID AS STRING * 4
+ FactSize AS LONG
+ FactDataSize AS LONG
+END TYPE
+
 TYPE WVHeaderStr
- RIFF AS STRING * 4
- FileSize AS LONG
- WAVE AS STRING * 4
- FMT AS STRING * 4
- FMTSize AS LONG
+ RIFFID AS STRING * 4
+ RIFFSize AS LONG
+ WAVEID AS STRING * 4
+ FormatID AS STRING * 4
+ FormatSize AS LONG
  Format AS INTEGER
  Channels AS INTEGER
- SampleRate AS LONG
+ Frequency AS LONG
  ByteRate AS LONG
- Align AS INTEGER
- BitsPerSample AS LONG
- DataV AS STRING * 4
- DataSize AS LONG
+ Alignment AS INTEGER
+ BitsPerSample AS INTEGER
 END TYPE
 
 DECLARE FUNCTION SBBaseAddress ()
@@ -21,7 +31,7 @@ DECLARE FUNCTION SBReset (BaseAddress)
 DECLARE SUB Delay (Interval AS SINGLE)
 DECLARE SUB SBOutputSample (BaseAddress, Sample)
 DECLARE SUB SBVolume (BaseAdress, LeftSide, RightSide)
-DECLARE SUB WVDisplayHeader (Header AS WVHeaderStr)
+DECLARE SUB WVDisplayHeader (WVHeader AS WVHeaderStr, WVFact AS WVFactStr, WVData AS WVDataStr)
 DECLARE SUB WVPlay (WVFile$, BaseAddress)
 
  SCREEN 0
@@ -79,24 +89,32 @@ SUB SBVolume (BaseAddress, LeftSide, RightSide)
  OUT BaseAddress + &H5, (LeftSide * &H10 OR RightSide)
 END SUB
 
-SUB WVDisplayHeader (Header AS WVHeaderStr)
- PRINT "RIFF: "; Header.RIFF
- PRINT "File size: "; Header.FileSize + 8
- PRINT "Wave: "; Header.WAVE
- PRINT "Format: "; Header.FMT
- PRINT "Format size: "; Header.FMTSize
- PRINT "Format type: "; Header.Format
- PRINT "Channel count: "; Header.Channels
- PRINT "Sample rate: "; Header.SampleRate
- PRINT "Byte rate: "; Header.ByteRate
- PRINT "Align: "; Header.Align
- PRINT "Bits per sample: "; Header.BitsPerSample
- PRINT "Data: "; Header.DataV
- PRINT "Data size: "; Header.DataSize
+SUB WVDisplayHeader (WVHeader AS WVHeaderStr, WVFact AS WVFactStr, WVData AS WVDataStr)
+ PRINT "RIFF ID: "; WVHeader.RIFFID
+ PRINT "File size: "; WVHeader.RIFFSize + 8
+ PRINT "WAVE ID: "; WVHeader.WAVEID
+ PRINT "Format ID: "; WVHeader.FormatID
+ PRINT "Format size: "; WVHeader.FormatSize
+ PRINT "Format: "; WVHeader.Format
+ PRINT "Channel count: "; WVHeader.Channels
+ PRINT "Frequency: "; WVHeader.Frequency
+ PRINT "Byte rate: "; WVHeader.ByteRate
+ PRINT "Alignment: "; WVHeader.Alignment
+ PRINT "Bits per sample: "; WVHeader.BitsPerSample
+
+ PRINT "Padding: "; WVFact.Padding
+ PRINT "Fact ID: "; WVFact.FactID
+ PRINT "Fact size: "; WVFact.FactSize
+ PRINT "Fact data size: "; WVFact.FactDataSize
+
+ PRINT "Data ID: "; WVData.DataID
+ PRINT "Data size: "; WVData.DataSize
 END SUB
 
 SUB WVPlay (WVFile$, BaseAddress)
-DIM Header AS WVHeaderStr
+DIM WVData AS WVDataStr
+DIM WVFact AS WVFactStr
+DIM WVHeader AS WVHeaderStr
 
  PRINT "Playing: "; WVFile$
 
@@ -105,14 +123,16 @@ DIM Header AS WVHeaderStr
 
  FileH = FREEFILE
  OPEN WVFile$ FOR BINARY AS FileH
-  GET #FileH, , Header
+  GET #FileH, , WVHeader
+  IF WVHeader.FormatSize = 18 THEN GET #FileH, , WVFact
+  GET #FileH, , WVData
  
-  IF Header.RIFF = "RIFF" AND Header.BitsPerSample = 8 AND Header.Channels = 1 AND Header.Format = &H1 AND Header.SampleRate <= 32000 THEN
-   WVDisplayHeader Header
+  IF WVHeader.RIFFID = "RIFF" AND WVHeader.BitsPerSample = 8 AND WVHeader.Channels = 1 AND WVHeader.Format = &H1 AND WVHeader.Frequency <= 32000 THEN
+   WVDisplayHeader WVHeader, WVFact, WVData
 
    DO UNTIL LOC(FileH) >= LOF(FileH)
     Chunk$ = ""
-    Chunk$ = INPUT$(Header.SampleRate, FileH)
+    Chunk$ = INPUT$(WVHeader.Frequency, FileH)
     FOR Sample = 1 TO LEN(Chunk$)
      SBOutputSample BaseAddress, ASC(MID$(Chunk$, Sample, 1))
     NEXT Sample
