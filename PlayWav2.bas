@@ -80,25 +80,30 @@ DECLARE FUNCTION EMSInstalled ()
 DECLARE FUNCTION EMSPageFrameAddress ()
 DECLARE FUNCTION FileExists (FileName$)
 DECLARE FUNCTION SBBaseAddress ()
+DECLARE FUNCTION SBBytesLeft& (SB AS SBSettingsStr)
 DECLARE FUNCTION SBDMAChannel ()
 DECLARE FUNCTION SBInitialize (SB AS SBSettingsStr)
-DECLARE FUNCTION SBInUse (SB AS SBSettingsStr)
+DECLARE FUNCTION SBInUse (BytesLeft&)
 DECLARE FUNCTION WVLoad (WVFile$, WVParameters AS WVParametersStr, EMSPagesReserved)
 DECLARE SUB Delay (Interval!)
+DECLARE SUB DisplayVolume (x, y, LeftSide, RightSide)
+DECLARE SUB DMASetChannel (SB AS SBSettingsStr, Enabled)
 DECLARE SUB EMSCopyBaseToEMS (Length&, SrcSegment, SrcOffset, DstHandle, DstOffset, DstPage)
 DECLARE SUB EMSDeallocatePages (Handle)
 DECLARE SUB EMSMapPages (PhysicalStart, LogicalStart, PageCount, Handle)
+DECLARE SUB GetShiftStatus (LeftShift, RightShift)
 DECLARE SUB Initialize ()
 DECLARE SUB InterruptX (intnum AS INTEGER, inreg AS RegTypeX, outreg AS RegTypeX)
 DECLARE SUB Main (WVFile$)
 DECLARE SUB Quit (Message$, WVParameters AS WVParametersStr)
+DECLARE SUB SBGetVolume (SB AS SBSettingsStr, LeftSide, RightSide)
 DECLARE SUB SBPause (SB AS SBSettingsStr)
 DECLARE SUB SBPlayWave (WVParameters AS WVParametersStr, WVPlayer AS WVPlayerStr, SB AS SBSettingsStr)
 DECLARE SUB SBResume (SB AS SBSettingsStr)
+DECLARE SUB SBSetVolume (SB AS SBSettingsStr, LeftSide, RightSide)
 DECLARE SUB SBSpeakerOff (SB AS SBSettingsStr)
 DECLARE SUB SBSpeakerOn (SB AS SBSettingsStr)
-DECLARE SUB SBVolume (SB AS SBSettingsStr, LeftSide, RightSide)
-DECLARE SUB SBWriteDSP (Byte, SB AS SBSettingsStr)
+DECLARE SUB SBWriteDSP (SB AS SBSettingsStr, Byte)
 
 DIM SHARED EMSErrorCode
 
@@ -110,6 +115,20 @@ DIM StartTime!
 
  StartTime! = TIMER
  DO: LOOP UNTIL TIMER >= StartTime! + Interval! OR TIMER <= Interval!
+END SUB
+
+SUB DisplayVolume (x, y, LeftSide, RightSide)
+ LOCATE x, y: PRINT "Volume:"
+ LOCATE , y
+ PRINT "  Left: ["; STRING$(LeftSide, "*"); SPACE$(&HF - LeftSide); "]"
+ LOCATE , y
+ PRINT " Right: ["; STRING$(RightSide, "*"); SPACE$(&HF - RightSide); "]"
+END SUB
+
+SUB DMASetChannel (SB AS SBSettingsStr, Enabled)
+ OUT &HA, (ABS(Enabled) * &H4) OR SB.DMAChannel
+ OUT &HB, &H48 OR SB.DMAChannel
+ OUT &HC, &H0
 END SUB
 
 FUNCTION EMSAllocatePages (PageCount)
@@ -275,6 +294,13 @@ DIM Registers AS RegTypeX
  FileExists = (INSTR(DTA.FileName, CHR$(0)) > 1)
 END FUNCTION
 
+SUB GetShiftStatus (LeftShift, RightShift)
+ DEF SEG = &H40
+ Status = PEEK(&H17)
+ RightShift = ((Status AND &H1) = &H1)
+ LeftShift = ((Status AND &H2) = &H2)
+END SUB
+
 SUB Initialize
  SCREEN 0
  WIDTH 80, 25
@@ -290,75 +316,105 @@ DIM SB AS SBSettingsStr
 DIM WVParameters AS WVParametersStr
 DIM WVPlayer AS WVPlayerStr
 
+ WVFile$ = LTRIM$(RTRIM$(WVFile$))
  WVPlayer.Paused = 0
  SB.BaseAddress = SBBaseAddress
  SB.DMAChannel = SBDMAChannel
- SBVolume SB, &HF, &HF
+ SBSetVolume SB, &HF, &HF
 
- LOCATE 1, 1: PRINT "Wave Player v1.01 - by: Peter Swinkels ***2021***"
+ LOCATE 1, 1: PRINT "Wave Player v1.02 - by: Peter Swinkels ***2021***"
+ PRINT
 
- IF FileExists(WVFile$) THEN
-  IF SBInitialize(SB) THEN
-   IF EMSInstalled THEN
-    EMSPagesToReserve = EMSFreePages
-    IF EMSPagesToReserve > 0 THEN
-     WVParameters.EMSHandle = EMSAllocatePages(EMSPagesToReserve)
-     IF WVLoad(WVFile$, WVParameters, EMSPagesToReserve) THEN
-      PRINT
-      PRINT " Playing: "; WVFile$
-      PRINT
-      PRINT " Keys: Escape = Quit  P = Pause/Resume."
+ IF WVFile$ = "" THEN
+  Quit "Specify the wave file to be played as the command line argument.", WVParameters
+ ELSE
+  IF FileExists(WVFile$) THEN
+   IF SBInitialize(SB) THEN
+    IF EMSInstalled THEN
+     EMSPagesToReserve = EMSFreePages
+     IF EMSPagesToReserve > 0 THEN
+      WVParameters.EMSHandle = EMSAllocatePages(EMSPagesToReserve)
+      IF WVLoad(WVFile$, WVParameters, EMSPagesToReserve) THEN
+       LOCATE 3, 1
+       PRINT " Playing: "; WVFile$
+       PRINT
+       PRINT " Base address: 0x"; HEX$(SB.BaseAddress)
+       PRINT " DMA channel: 0x"; HEX$(SB.DMAChannel)
+       SBGetVolume SB, LeftSide, RightSide
+       DisplayVolume 10, 2, LeftSide, RightSide
+       
+       LOCATE 23, 1
+       PRINT " Escape = Quit  P = Pause/Resume  -/+ [+Left/Right Shift] = Volume "
 
-      SBSpeakerOn SB
+       SBSpeakerOn SB
   
-      WVPlayer.CurrentPage = 0
-      WVPlayer.Remainder = WVParameters.Length
+       WVPlayer.CurrentPage = 0
+       WVPlayer.Remainder = WVParameters.Length
 
-      DO
-       LOCATE 7, 3: PRINT "Data remaining: "; LTRIM$(RTRIM$(STR$(WVPlayer.Remainder))); "/"; LTRIM$(RTRIM$(STR$(WVParameters.Length))); " bytes."; SPACE$(5)
-      
-       IF WVPlayer.Remainder = &H0& THEN
-        EXIT DO
-       ELSEIF WVPlayer.Remainder > &HFFFF& THEN
-        WVPlayer.ChunkLength = &HFFFF&
-       ELSE
-        WVPlayer.ChunkLength = WVPlayer.Remainder
-       END IF
+       DO
+        IF WVPlayer.Remainder = &H0& THEN
+         EXIT DO
+        ELSEIF WVPlayer.Remainder > &HFFFF& THEN
+         WVPlayer.ChunkLength = &HFFFF&
+        ELSE
+         WVPlayer.ChunkLength = WVPlayer.Remainder
+        END IF
+   
+        WVPlayer.ChunkPageCount = (WVPlayer.ChunkLength \ EMSPAGESIZE) + 1
+        SBPlayWave WVParameters, WVPlayer, SB
+       
+        DO
+         BytesLeft& = SBBytesLeft&(SB)
+         LOCATE 8, 3: PRINT "Data remaining: "; LTRIM$(RTRIM$(STR$(WVPlayer.Remainder - (EMSPAGESIZE - BytesLeft&)))); "/"; LTRIM$(RTRIM$(STR$(WVParameters.Length))); " bytes."; SPACE$(5)
 
-       WVPlayer.ChunkPageCount = (WVPlayer.ChunkLength \ EMSPAGESIZE) + 1
-       SBPlayWave WVParameters, WVPlayer, SB
-      
-       DO WHILE SBInUse(SB)
-        Key$ = INKEY$
-        SELECT CASE Key$
-         CASE "p", "P"
-          WVPlayer.Paused = NOT WVPlayer.Paused
-          IF WVPlayer.Paused THEN SBPause SB ELSE SBResume SB
-         CASE CHR$(27)
-          EXIT DO
-        END SELECT
-       LOOP
+         Key$ = INKEY$
+         SELECT CASE Key$
+          CASE "p", "P"
+           WVPlayer.Paused = NOT WVPlayer.Paused
+           IF WVPlayer.Paused THEN SBPause SB ELSE SBResume SB
+          CASE "-", "+"
+           GetShiftStatus LeftShift, RightShift
+           IF NOT (LeftShift OR RightShift) THEN LeftShift = -1: RightShift = -1
+
+           SBGetVolume SB, LeftSide, RightSide
+           
+           SELECT CASE Key$
+            CASE "-"
+             IF LeftShift AND LeftSide > &H0 THEN LeftSide = LeftSide - &H1
+             IF RightShift AND RightSide > &H0 THEN RightSide = RightSide - &H1
+            CASE "+"
+             IF LeftShift AND LeftSide < &HF THEN LeftSide = LeftSide + &H1
+             IF RightShift AND RightSide < &HF THEN RightSide = RightSide + &H1
+           END SELECT
+
+           SBSetVolume SB, LeftSide, RightSide
+           DisplayVolume 10, 2, LeftSide, RightSide
+          CASE CHR$(27)
+           EXIT DO
+         END SELECT
+        LOOP WHILE SBInUse(BytesLeft&)
     
-       WVPlayer.CurrentPage = WVPlayer.CurrentPage + WVPlayer.ChunkPageCount
-       WVPlayer.Remainder = WVPlayer.Remainder - WVPlayer.ChunkLength
-      LOOP UNTIL Key$ = CHR$(27)
+        WVPlayer.CurrentPage = WVPlayer.CurrentPage + WVPlayer.ChunkPageCount
+        WVPlayer.Remainder = WVPlayer.Remainder - WVPlayer.ChunkLength
+       LOOP UNTIL Key$ = CHR$(27)
     
-      SBSpeakerOff SB
-      Quit "", WVParameters
+       SBSpeakerOff SB
+       Quit "", WVParameters
+      ELSE
+       Quit WVFile$ + " - unsupported WAVE file format.", WVParameters
+      END IF
      ELSE
-      Quit WVFile$ + " - unsupported WAVE file format.", WVParameters
+      Quit "Not enough free EMS pages.", WVParameters
      END IF
     ELSE
-     Quit "Not enough free EMS pages.", WVParameters
+     Quit "No EMS driver detected.", WVParameters
     END IF
    ELSE
-    Quit "No EMS driver detected.", WVParameters
+    Quit "Could not initialize the Sound Blaster.", WVParameters
    END IF
   ELSE
-   Quit "Could not initialize the Sound Blaster.", WVParameters
+   Quit "Could not open the file: " + WVFile$ + ".", WVParameters
   END IF
- ELSE
-  Quit "Could not open the file: " + WVFile$ + ".", WVParameters
  END IF
 END SUB
 
@@ -394,6 +450,10 @@ FUNCTION SBBaseAddress
  SBBaseAddress = BaseAddress
 END FUNCTION
 
+FUNCTION SBBytesLeft& (SB AS SBSettingsStr)
+ SBBytesLeft& = INP(SB.DMALength) OR INP(SB.DMALength) * &H100&
+END FUNCTION
+
 FUNCTION SBDMAChannel
  DMAChannel = &H1
 
@@ -408,10 +468,18 @@ FUNCTION SBDMAChannel
  SBDMAChannel = DMAChannel
 END FUNCTION
 
+SUB SBGetVolume (SB AS SBSettingsStr, LeftSide, RightSide)
+ OUT SB.BaseAddress + &H4, &H22
+ Volume = INP(SB.BaseAddress + &H5)
+ LeftSide = Volume \ &H10
+ RightSide = Volume AND &HF
+END SUB
+
 FUNCTION SBInitialize (SB AS SBSettingsStr)
  Success = -1
 
  OUT SB.BaseAddress + &H6, &H1
+ WAIT SB.BaseAddress + &H6, &H80
  OUT SB.BaseAddress + &H6, &H0
 
  Delay .03
@@ -436,32 +504,21 @@ FUNCTION SBInitialize (SB AS SBSettingsStr)
   END SELECT
  END IF
 
- IF Success THEN
-  OUT &HA, SB.DMAChannel + &H4
-  OUT &HC, &H0
- END IF
-
  SBInitialize = Success
 END FUNCTION
 
-FUNCTION SBInUse (SB AS SBSettingsStr)
- OUT &HC, &H0
-
- BytesLeft& = INP(SB.DMALength) + INP(SB.DMALength) * &H100&
-
+FUNCTION SBInUse (BytesLeft&)
  SBInUse = NOT (BytesLeft& = &H0 OR BytesLeft& = &HFFFF&)
 END FUNCTION
 
 SUB SBPause (SB AS SBSettingsStr)
- SBWriteDSP &HD0, SB
+ SBWriteDSP SB, &HD0
 END SUB
 
 SUB SBPlayWave (WVParameters AS WVParametersStr, WVPlayer AS WVPlayerStr, SB AS SBSettingsStr)
  EMSMapPages 0, WVPlayer.CurrentPage, WVPlayer.ChunkPageCount, WVParameters.EMSHandle
 
- OUT &HA, SB.DMAChannel + &H4
- OUT &HC, &H0
- OUT &HB, SB.DMAChannel + &H48
+ DMASetChannel SB, -1
 
  EMSPageFrameFlatAddress& = (&H10000 + EMSPageFrameAddress) * &H10&
 
@@ -473,34 +530,34 @@ SUB SBPlayWave (WVParameters AS WVParametersStr, WVPlayer AS WVPlayerStr, SB AS 
  OUT SB.DMALength, (WVPlayer.ChunkLength - &H1&) AND &HFF&
  OUT SB.DMALength, ((WVPlayer.ChunkLength - &H1&) AND &HFF00&) \ &H100&
 
- OUT &HA, SB.DMAChannel
+ DMASetChannel SB, 0
 
- SBWriteDSP &H40, SB
- SBWriteDSP ((&H100& - &HF4240) \ WVParameters.Frequency), SB
+ SBWriteDSP SB, &H40
+ SBWriteDSP SB, ((&H100& - &HF4240) \ WVParameters.Frequency)
 
- SBWriteDSP &H14, SB
- SBWriteDSP ((WVPlayer.ChunkLength - &H1&) AND &HFF&), SB
- SBWriteDSP (((WVPlayer.ChunkLength - &H1&) AND &HFF00&) \ &H100&), SB
+ SBWriteDSP SB, &H14
+ SBWriteDSP SB, ((WVPlayer.ChunkLength - &H1&) AND &HFF&)
+ SBWriteDSP SB, (((WVPlayer.ChunkLength - &H1&) AND &HFF00&) \ &H100&)
 END SUB
 
 SUB SBResume (SB AS SBSettingsStr)
- SBWriteDSP &HD4, SB
+ SBWriteDSP SB, &HD4
 END SUB
 
-SUB SBSpeakerOff (SB AS SBSettingsStr)
- SBWriteDSP &HD3, SB
-END SUB
-
-SUB SBSpeakerOn (SB AS SBSettingsStr)
- SBWriteDSP &HD1, SB
-END SUB
-
-SUB SBVolume (SB AS SBSettingsStr, LeftSide, RightSide)
+SUB SBSetVolume (SB AS SBSettingsStr, LeftSide, RightSide)
  OUT SB.BaseAddress + &H4, &H22
  OUT SB.BaseAddress + &H5, (LeftSide * &H10 OR RightSide)
 END SUB
 
-SUB SBWriteDSP (Byte, SB AS SBSettingsStr)
+SUB SBSpeakerOff (SB AS SBSettingsStr)
+ SBWriteDSP SB, &HD3
+END SUB
+
+SUB SBSpeakerOn (SB AS SBSettingsStr)
+ SBWriteDSP SB, &HD1
+END SUB
+
+SUB SBWriteDSP (SB AS SBSettingsStr, Byte)
  WAIT SB.BaseAddress + &HC, &H80, &H80
  OUT SB.BaseAddress + &HC, Byte
 END SUB
